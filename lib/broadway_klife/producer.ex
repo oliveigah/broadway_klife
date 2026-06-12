@@ -218,7 +218,7 @@ defmodule BroadwayKlife.Producer do
 
     cg_child = %{
       id: {opts[:consumer_group], opts[:group_name]},
-      start: {opts[:consumer_group], :start_link, [cg_args]},
+      start: {BroadwayKlife.ConsumerGroupStarter, :start_link, [opts[:consumer_group], cg_args]},
       restart: :permanent,
       type: :worker
     }

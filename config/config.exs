@@ -1,5 +1,7 @@
 import Config
 
+import_config "#{config_env()}.exs"
+
 config :broadway_klife, BroadwayKlife.TestClient,
   connection: [
     bootstrap_servers: ["localhost:19092", "localhost:29092"],

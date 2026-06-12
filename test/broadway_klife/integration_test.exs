@@ -9,18 +9,67 @@ defmodule BroadwayKlife.IntegrationTest do
   defmodule Pipeline do
     use Broadway
 
+    alias Broadway.Message
+    alias Klife.Record
+
     def start_link(opts), do: Broadway.start_link(__MODULE__, opts)
 
     @impl true
-    def handle_message(_processor, message, %{test: test}) do
-      send(test, {:message, message})
-      message
+    def handle_message(_processor, %Message{} = message, %{test: test} = context) do
+      block_ms = Map.get(context, :block_ms, 10_000)
+
+      case msg_action(message) do
+        "fail" -> Message.failed(message, :injected_failure)
+        "block" -> Process.sleep(block_ms) && message
+        _ -> send(test, {:message, message}) && message
+      end
     end
 
     @impl true
-    def handle_batch(_batcher, messages, batch_info, %{test: test}) do
+    def handle_batch(_batcher, messages, batch_info, %{test: test} = context) do
+      block_ms = Map.fetch!(context, :block_ms)
+
+      messages =
+        Enum.map(messages, fn message ->
+          case batch_action(message) do
+            "fail" -> Message.failed(message, :injected_failure)
+            "block" -> Process.sleep(block_ms) && message
+            _ -> message
+          end
+        end)
+
       send(test, {:batch, batch_info, messages})
       messages
+    end
+
+    @impl true
+    def handle_failed(messages, %{test: test}) do
+      Enum.each(messages, fn message -> send(test, {:failed, message}) end)
+      messages
+    end
+
+    defp msg_action(%Message{data: %Record{headers: headers}}),
+      do: find_header(headers, "msg_action")
+
+    defp msg_action(%Message{metadata: %{headers: headers}}),
+      do: find_header(headers, "msg_action")
+
+    defp msg_action(_message), do: nil
+
+    defp batch_action(%Message{data: %Record{headers: headers}}),
+      do: find_header(headers, "batch_action")
+
+    defp batch_action(%Message{metadata: %{headers: headers}}),
+      do: find_header(headers, "batch_action")
+
+    defp batch_action(_message), do: nil
+
+    defp find_header(headers, key) do
+      Enum.find_value(headers, fn
+        %{key: ^key, value: value} -> value
+        {^key, value} -> value
+        _ -> nil
+      end)
     end
   end
 
@@ -57,7 +106,7 @@ defmodule BroadwayKlife.IntegrationTest do
   end
 
   test "consumes produced records end to end (:klife format)", %{tp_list: tp_list} do
-    start_pipeline(tp_list_to_topics(tp_list), [])
+    start_pipeline(topics: tp_list_to_topics(tp_list))
     values = for i <- 1..10, do: "v-#{i}"
     produce!(tp_list, values)
 
@@ -80,7 +129,7 @@ defmodule BroadwayKlife.IntegrationTest do
   end
 
   test "consumes with :broadway_kafka format (data is the value + metadata)", %{tp_list: tp_list} do
-    start_pipeline(tp_list_to_topics(tp_list), message_format: :broadway_kafka)
+    start_pipeline(topics: tp_list_to_topics(tp_list), message_format: :broadway_kafka)
     values = for i <- 1..5, do: "bk-#{i}"
     produce!(tp_list, values)
 
@@ -109,7 +158,7 @@ defmodule BroadwayKlife.IntegrationTest do
     values = for i <- 1..10, do: "c-#{i}"
     produce!(tp_list, values)
 
-    start_pipeline_opts(
+    start_pipeline(
       topics: tp_list_to_topics(tp_list),
       offset_reset_policy: :earliest,
       producer_concurrency: 2
@@ -144,7 +193,7 @@ defmodule BroadwayKlife.IntegrationTest do
     batch1 = for i <- 1..per_tp, do: "b1-#{i}"
     produce!(tp_list, batch1)
 
-    start_pipeline_opts(
+    start_pipeline(
       topics: topics,
       group_name: group,
       offset_reset_policy: :earliest,
@@ -158,12 +207,9 @@ defmodule BroadwayKlife.IntegrationTest do
     batch2 = for i <- 1..per_tp, do: "b2-#{i}"
     produce!(tp_list, batch2)
 
-    # run1 is fully stopped: nothing consumes batch2 until run2 starts. If the old
-    # pipeline were still alive it would (already assigned) deliver batch2 here.
     refute_receive {:message, _}, 1_000
 
-    # same group: a committed offset exists, so it must resume past batch1
-    start_pipeline_opts(
+    start_pipeline(
       topics: topics,
       group_name: group,
       offset_reset_policy: :earliest,
@@ -178,8 +224,6 @@ defmodule BroadwayKlife.IntegrationTest do
 
     refute_receive {:message, _}, 1_000
 
-    # every partition resumes past batch1 and delivers exactly batch2, in order —
-    # no sorting, so re-delivery or reordering would fail the assertion.
     grouped = Enum.group_by(consumed, fn %Record{} = r -> {r.topic, r.partition} end)
     assert map_size(grouped) == length(tp_list)
 
@@ -191,41 +235,227 @@ defmodule BroadwayKlife.IntegrationTest do
 
   test "delivers per-partition batches (handle_batch, batch_key = {topic, partition})",
        %{tp_list: tp_list} do
-    per_tp = 4
+    per_tp = 13
+    batch_size = 5
     total = length(tp_list) * per_tp
     values = for i <- 1..per_tp, do: "batch-#{i}"
     produce!(tp_list, values)
 
-    start_pipeline_opts(
+    start_pipeline(
       topics: tp_list_to_topics(tp_list),
       offset_reset_policy: :earliest,
-      batchers: [default: [concurrency: 2, batch_size: 100, batch_timeout: 200]]
+      batchers: [default: [concurrency: 2, batch_size: batch_size, batch_timeout: 200]]
     )
 
-    batches = collect_batches([], total)
-    consumed = Enum.flat_map(batches, fn {_info, msgs} -> msgs end)
+    expected_batches = length(tp_list) * ceil(per_tp / batch_size)
+
+    batches =
+      Enum.map(1..expected_batches, fn _ ->
+        assert_receive {:batch, batch_info, messages}, 15_000
+        {batch_info.batch_key, messages}
+      end)
+      |> Enum.group_by(fn {k, _msgs} -> k end, fn {_k, msgs} -> msgs end)
+
+    consumed =
+      Enum.flat_map(batches, fn {_k, batch_list} ->
+        Enum.flat_map(batch_list, fn batch -> batch end)
+      end)
+
     assert length(consumed) == total
 
-    # each batch holds exactly one partition's records
-    Enum.each(batches, fn {_info, msgs} ->
-      partitions =
-        msgs
-        |> Enum.map(fn %Message{data: %Record{} = r} -> {r.topic, r.partition} end)
-        |> Enum.uniq()
+    Enum.each(batches, fn {{t, p}, batch_list} ->
+      assert length(batch_list) == ceil(per_tp / batch_size)
 
-      assert length(partitions) == 1
-      assert hd(partitions) in tp_list
+      Enum.with_index(batch_list, 1)
+      |> Enum.each(fn {b, idx} ->
+        if idx == length(batch_list) do
+          expected_length_for_last =
+            case rem(per_tp, batch_size) do
+              0 -> batch_size
+              other -> other
+            end
+
+          assert length(b) == expected_length_for_last
+        else
+          assert length(b) == batch_size
+        end
+      end)
+
+      received_records = List.flatten(batch_list) |> Enum.map(fn msg -> msg.data end)
+
+      assert received_records ==
+               Enum.sort(received_records, fn rec1, rec2 -> rec1.offset < rec2.offset end)
+
+      received_values =
+        received_records
+        |> Enum.map(fn %Record{} = rec ->
+          assert rec.topic == t
+          assert rec.partition == p
+          rec.value
+        end)
+
+      assert values == received_values
     end)
   end
 
-  defp collect_batches(acc, remaining) when remaining <= 0, do: acc
+  test "failed messages hit handle_failed, advance the offset, and are not re-delivered",
+       %{tp_list: tp_list} do
+    topics = tp_list_to_topics(tp_list)
+    group = "bk_e2e_fail_#{:rand.bytes(8) |> Base.encode16()}"
 
-  defp collect_batches(acc, remaining) do
-    receive do
-      {:batch, info, msgs} -> collect_batches([{info, msgs} | acc], remaining - length(msgs))
-    after
-      15_000 -> flunk("timed out waiting for batches, #{remaining} records still missing")
-    end
+    produce_actions!(tp_list, [
+      {"ok-1", "ok", "ok"},
+      {"boom", "fail", "invalid"},
+      {"ok-2", "ok", "ok"}
+    ])
+
+    start_pipeline(
+      topics: topics,
+      group_name: group,
+      offset_reset_policy: :earliest,
+      id: :fail1
+    )
+
+    oks =
+      for _ <- 1..(length(tp_list) * 2) do
+        assert_receive {:message, %Message{data: %Record{} = record}}, 15_000
+        record
+      end
+
+    fails =
+      for _ <- 1..length(tp_list) do
+        assert_receive {:failed, %Message{data: %Record{} = record}}, 15_000
+        record
+      end
+
+    oks
+    |> Enum.group_by(fn %Record{} = r -> {r.topic, r.partition} end)
+    |> Enum.each(fn {tp, recs} ->
+      assert tp in tp_list
+      assert Enum.map(recs, & &1.value) == ["ok-1", "ok-2"]
+    end)
+
+    fails
+    |> Enum.group_by(fn %Record{} = r -> {r.topic, r.partition} end)
+    |> Enum.each(fn {tp, recs} ->
+      assert tp in tp_list
+      assert Enum.map(recs, & &1.value) == ["boom"]
+    end)
+
+    :ok = stop_supervised(:fail1)
+
+    start_pipeline(
+      topics: topics,
+      group_name: group,
+      offset_reset_policy: :earliest,
+      id: :fail2
+    )
+
+    refute_receive {:message, _}, 2_000
+    refute_receive {:failed, _}, 2_000
+  end
+
+  test "offset tracker holds the commit at the contiguous prefix on out-of-order acks",
+       %{tp_list: tp_list} do
+    {topic, partition} = hd(tp_list)
+    group = "bk_e2e_tracker_#{:rand.bytes(8) |> Base.encode16()}"
+
+    produce_actions!([{topic, partition}], [
+      {"r0", "ok", "block"},
+      {"r1", "fail", "invalid"},
+      {"r2", "ok", "block"},
+      {"r3", "fail", "invalid"}
+    ])
+
+    pipe1_pid =
+      start_pipeline(
+        topics: [topic],
+        group_name: group,
+        offset_reset_policy: :earliest,
+        batchers: [default: [concurrency: 1, batch_size: 100, batch_timeout: 5_000]],
+        id: :pipe1
+      )
+
+    assert_receive {:message, %Message{data: %Record{value: "r0"}}}, 15_000
+    assert_receive {:failed, %Message{data: %Record{value: "r1"}}}, 15_000
+    assert_receive {:message, %Message{data: %Record{value: "r2"}}}, 15_000
+    assert_receive {:failed, %Message{data: %Record{value: "r3"}}}, 15_000
+
+    Process.exit(pipe1_pid, :kill)
+
+    refute_receive {:batch, _batch_info, _messages}, 2_000
+
+    start_pipeline(
+      topics: [topic],
+      group_name: group,
+      offset_reset_policy: :earliest,
+      batchers: [default: [concurrency: 1, batch_size: 100, batch_timeout: 5_000]],
+      block_ms: 0,
+      id: :pipe2
+    )
+
+    assert_receive {:message, %Message{data: %Record{value: "r0"}}}, 15_000
+    assert_receive {:failed, %Message{data: %Record{value: "r1"}}}, 15_000
+    assert_receive {:message, %Message{data: %Record{value: "r2"}}}, 15_000
+    assert_receive {:failed, %Message{data: %Record{value: "r3"}}}, 15_000
+
+    assert_receive {:batch, _batch_info, messages}, 15_000
+
+    assert ["r0", "r2"] = Enum.map(messages, fn msg -> msg.data.value end)
+    :ok = stop_supervised(:pipe2)
+
+    start_pipeline(
+      topics: [topic],
+      group_name: group,
+      offset_reset_policy: :earliest,
+      batchers: [default: [concurrency: 1, batch_size: 100, batch_timeout: 5_000]],
+      block_ms: 0,
+      id: :pipe3
+    )
+
+    refute_receive {:message, _}, 5_000
+    refute_receive {:failed, _}
+    refute_receive {:batch, _batch_info, _messages}
+  end
+
+  test "producer crash redelivers checked-out records instead of skipping them",
+       %{tp_list: tp_list} do
+    {topic, partition} = hd(tp_list)
+    unique = :rand.bytes(8) |> Base.encode16()
+    group = "bk_e2e_pkill_#{unique}"
+    pipeline_name = :"bk_e2e_pkill_pipe_#{unique}"
+
+    # k0 is processed and acked normally; k1 blocks its processor with k2
+    # queued behind it (same partition, same processor), so offsets 1..2 are
+    # checked out by the producer but redelivered when it is killed.
+    produce_actions!([{topic, partition}], [
+      {"k0", "ok", "ok"},
+      {"k1", "block", "ok"},
+      {"k2", "ok", "ok"}
+    ])
+
+    start_pipeline(
+      topics: [topic],
+      group_name: group,
+      offset_reset_policy: :earliest,
+      name: pipeline_name,
+      block_ms: 1_500,
+      id: :pkill
+    )
+
+    assert_receive {:message, %Message{data: %Record{value: "k0"}}}, 15_000
+
+    [producer_name] = Broadway.producer_names(pipeline_name)
+    producer_pid = Process.whereis(producer_name)
+    assert is_pid(producer_pid)
+    Process.exit(producer_pid, :kill)
+
+    # The first k2 is the copy already in flight when the producer died (its
+    # ack goes to the dead pid). The second one proves the consumer detected
+    # the dead puller and redelivered the checked-out window to the restarted
+    # producer instead of letting commits skip past it.
+    assert_receive {:message, %Message{data: %Record{value: "k2"}}}, 15_000
+    assert_receive {:message, %Message{data: %Record{value: "k2"}}}, 15_000
   end
 
   defp produce!(tp_list, values) do
@@ -239,35 +469,30 @@ defmodule BroadwayKlife.IntegrationTest do
     assert {:ok, _} = Record.verify_batch(results)
   end
 
-  defp start_pipeline(topics, producer_extra) do
-    unique = :rand.bytes(8) |> Base.encode16()
+  defp produce_actions!(tp_list, specs) do
+    records =
+      for {t, p} <- tp_list, {value, msg_action, batch_action} <- specs do
+        headers = [
+          %{key: "msg_action", value: msg_action},
+          %{key: "batch_action", value: batch_action}
+        ]
 
-    producer_opts =
-      [
-        consumer_group: BroadwayKlife.TestConsumerGroup,
-        group_name: "bk_e2e_grp_#{unique}",
-        # :earliest (not :latest) so the consumer reads from offset 0 regardless
-        # of whether records were produced before or after it joined — otherwise
-        # a produce that races ahead of the group's position is silently skipped.
-        topics: Enum.map(topics, fn t -> [name: t, offset_reset_policy: :earliest] end),
-        receive_interval: 100
-      ] ++ producer_extra
+        %Record{topic: t, partition: p, value: value, headers: headers}
+      end
 
-    start_supervised!(
-      {Pipeline,
-       name: :"bk_e2e_pipeline_#{unique}",
-       context: %{test: self()},
-       producer: [module: {BroadwayKlife.Producer, producer_opts}],
-       processors: [default: [concurrency: 4]]}
-    )
+    results = BroadwayKlife.TestClient.produce_batch(records)
+    assert {:ok, _} = Record.verify_batch(results)
   end
 
-  # Like start_pipeline/2 but with full control over offset policy, group name,
-  # producer concurrency, batchers and the supervision id (for restart tests).
-  defp start_pipeline_opts(opts) do
+  defp start_pipeline(opts) do
     topics = Keyword.fetch!(opts, :topics)
     unique = :rand.bytes(8) |> Base.encode16()
     reset = Keyword.get(opts, :offset_reset_policy, :earliest)
+
+    producer_extra =
+      opts
+      |> Keyword.take([:message_format])
+      |> Keyword.merge(Keyword.get(opts, :producer_opts, []))
 
     producer_opts =
       [
@@ -275,12 +500,15 @@ defmodule BroadwayKlife.IntegrationTest do
         group_name: Keyword.get(opts, :group_name, "bk_e2e_grp_#{unique}"),
         topics: Enum.map(topics, fn t -> [name: t, offset_reset_policy: reset] end),
         receive_interval: 100
-      ] ++ Keyword.get(opts, :producer_opts, [])
+      ] ++ producer_extra
 
     broadway =
       [
-        name: :"bk_e2e_pipeline_#{unique}",
-        context: %{test: self()},
+        name: Keyword.get(opts, :name, :"bk_e2e_pipeline_#{unique}"),
+        context: %{
+          test: self(),
+          block_ms: Keyword.get(opts, :block_ms, 10_000)
+        },
         producer: [
           module: {BroadwayKlife.Producer, producer_opts},
           concurrency: Keyword.get(opts, :producer_concurrency, 1)
@@ -289,7 +517,10 @@ defmodule BroadwayKlife.IntegrationTest do
       ]
       |> maybe_put_batchers(Keyword.get(opts, :batchers))
 
-    start_supervised!({Pipeline, broadway}, id: Keyword.get(opts, :id, :"pipeline_#{unique}"))
+    start_supervised!({Pipeline, broadway},
+      id: Keyword.get(opts, :id, :"pipeline_#{unique}"),
+      restart: :temporary
+    )
   end
 
   defp maybe_put_batchers(broadway, nil), do: broadway
