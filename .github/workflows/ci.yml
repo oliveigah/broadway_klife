@@ -1,0 +1,36 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tests-v4_1:
+    name: test-4.1
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - elixir: 1.19
+            otp: 28
+          - elixir: 1.18
+            otp: 27
+          - elixir: 1.17
+            otp: 26
+          - elixir: 1.16
+            otp: 25
+    steps:
+      - uses: actions/checkout@v3
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
+      - run: docker compose -f "test/compose_files/docker-compose-kafka-4.1.yml" up -d
+      - run: MIX_ENV=prod mix deps.get
+      - run: MIX_ENV=prod mix compile --warnings-as-errors
+      - run: mix test --warnings-as-errors

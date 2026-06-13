@@ -1,3 +1,7 @@
+[![ci](https://github.com/oliveigah/broadway_klife/actions/workflows/ci.yml/badge.svg)](https://github.com/oliveigah/broadway_klife/actions/workflows/ci.yml)
+[![hex.pm badge](https://img.shields.io/badge/Package%20on%20hex.pm-informational)](https://hex.pm/packages/broadway_klife)
+[![Documentation badge](https://img.shields.io/badge/Documentation-ff69b4)](https://hexdocs.pm/broadway_klife)
+
 # BroadwayKlife
 
 A [Broadway](https://hexdocs.pm/broadway) connector for Apache Kafka, built on
