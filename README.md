@@ -1,8 +1,8 @@
-[![ci](https://github.com/oliveigah/broadway_klife/actions/workflows/ci.yml/badge.svg)](https://github.com/oliveigah/broadway_klife/actions/workflows/ci.yml)
-[![hex.pm badge](https://img.shields.io/badge/Package%20on%20hex.pm-informational)](https://hex.pm/packages/broadway_klife)
-[![Documentation badge](https://img.shields.io/badge/Documentation-ff69b4)](https://hexdocs.pm/broadway_klife)
+[![ci](https://github.com/oliveigah/off_broadway_klife/actions/workflows/ci.yml/badge.svg)](https://github.com/oliveigah/off_broadway_klife/actions/workflows/ci.yml)
+[![hex.pm badge](https://img.shields.io/badge/Package%20on%20hex.pm-informational)](https://hex.pm/packages/off_broadway_klife)
+[![Documentation badge](https://img.shields.io/badge/Documentation-ff69b4)](https://hexdocs.pm/off_broadway_klife)
 
-# BroadwayKlife
+# OffBroadwayKlife
 
 A [Broadway](https://hexdocs.pm/broadway) connector for Apache Kafka, built on
 [Klife](https://hexdocs.pm/klife).
@@ -14,7 +14,7 @@ It bridges Klife's consumer group **manual mode** with Broadway.
 ```elixir
 def deps do
   [
-    {:broadway_klife, "~> 0.1.0"},
+    {:off_broadway_klife, "~> 0.1.0"},
     {:klife, "~> 1.1"}
   ]
 end
@@ -36,7 +36,7 @@ end
          name: __MODULE__,
          producer: [
            module:
-             {BroadwayKlife.Producer,
+             {OffBroadwayKlife.Producer,
               client: MyApp.KafkaClient,
               group_name: "my-broadway-group",
               topics: [[name: "orders"], [name: "events"]],
@@ -79,7 +79,7 @@ end
 - **`:broadway_kafka`** — `message.data` is the raw value and `message.metadata`
   mirrors [broadway_kafka](https://hexdocs.pm/broadway_kafka):
   `%{topic, partition, offset, key, ts, headers}` with headers as `{key, value}`
-  tuples. Drop `BroadwayKlife.Producer` with this message format into an existing
+  tuples. Drop `OffBroadwayKlife.Producer` with this message format into an existing
   broadway_kafka pipeline without touching `handle_message/3`.
 
 Routing, batching, acknowledgement and offset commits are identical either way

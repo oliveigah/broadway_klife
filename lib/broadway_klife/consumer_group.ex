@@ -1,4 +1,4 @@
-defmodule BroadwayKlife.ConsumerGroup do
+defmodule OffBroadwayKlife.ConsumerGroup do
   @moduledoc false
 
   use Klife.Consumer.ConsumerGroup

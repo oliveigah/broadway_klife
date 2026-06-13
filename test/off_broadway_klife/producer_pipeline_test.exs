@@ -1,5 +1,5 @@
-defmodule BroadwayKlife.ProducerPipelineTest do
-  # Drives a real Broadway pipeline (no broker) through BroadwayKlife.Producer
+defmodule OffBroadwayKlife.ProducerPipelineTest do
+  # Drives a real Broadway pipeline (no broker) through OffBroadwayKlife.Producer
   # with a fake Klife consumer group. This is the level that catches mistakes the
   # unit tests can't — e.g. partition_by must return an integer or the dispatcher
   # crashes on the first message.
@@ -72,7 +72,7 @@ defmodule BroadwayKlife.ProducerPipelineTest do
       Pipeline.start_link(
         name: __MODULE__.Running,
         context: %{test: self()},
-        producer: [module: {BroadwayKlife.Producer, producer_opts}],
+        producer: [module: {OffBroadwayKlife.Producer, producer_opts}],
         processors: [default: [concurrency: 2]],
         batchers: [default: [concurrency: 1, batch_size: 10, batch_timeout: 100]]
       )

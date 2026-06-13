@@ -1,12 +1,12 @@
-defmodule BroadwayKlife.Producer do
+defmodule OffBroadwayKlife.Producer do
   @producer_opts [
     client: [
       type: {:custom, __MODULE__, :validate_client, []},
       doc:
-        "A module that `use`s `Klife.Client`. The producer starts `BroadwayKlife.ConsumerGroup` " <>
+        "A module that `use`s `Klife.Client`. The producer starts `OffBroadwayKlife.ConsumerGroup` " <>
           "on this client (a single group membership) and drives it in manual mode. All " <>
           "`:client` pipelines in a node must use the same client — see " <>
-          "`BroadwayKlife.ConsumerGroup`. Exactly one of `:client` or `:consumer_group` " <>
+          "`OffBroadwayKlife.ConsumerGroup`. Exactly one of `:client` or `:consumer_group` " <>
           "must be set."
     ],
     consumer_group: [
@@ -89,7 +89,7 @@ defmodule BroadwayKlife.Producer do
             name: __MODULE__,
             producer: [
               module:
-                {BroadwayKlife.Producer,
+                {OffBroadwayKlife.Producer,
                  client: MyApp.KafkaClient,
                  group_name: "my-broadway-group",
                  topics: [[name: "orders"], [name: "events"]],
@@ -107,11 +107,11 @@ defmodule BroadwayKlife.Producer do
         end
       end
 
-  The producer starts its built-in consumer group, `BroadwayKlife.ConsumerGroup`,
+  The producer starts its built-in consumer group, `OffBroadwayKlife.ConsumerGroup`,
   on the client and supervises it as part of the pipeline, so there is no
   consumer group to define or add to your supervision tree. The built-in group
   is bound to the client on first start, which means all `:client` pipelines in
-  a node must use the same Klife client (see `BroadwayKlife.ConsumerGroup`).
+  a node must use the same Klife client (see `OffBroadwayKlife.ConsumerGroup`).
 
   ### Using a consumer group module
 
@@ -133,7 +133,7 @@ defmodule BroadwayKlife.Producer do
 
       producer: [
         module:
-          {BroadwayKlife.Producer,
+          {OffBroadwayKlife.Producer,
            consumer_group: MyApp.KafkaConsumerGroup,
            group_name: "my-broadway-group",
            topics: [[name: "orders"]]}
@@ -164,7 +164,7 @@ defmodule BroadwayKlife.Producer do
   - `:broadway_kafka` - `message.data` is the raw value and `message.metadata`
     mirrors [broadway_kafka](https://hexdocs.pm/broadway_kafka): `%{topic,
     partition, offset, key, ts, headers}` with headers as `{key, value}` tuples.
-    Use this to drop `BroadwayKlife.Producer` into an existing broadway_kafka
+    Use this to drop `OffBroadwayKlife.Producer` into an existing broadway_kafka
     pipeline without changing `handle_message/3`.
 
   Either way, routing, batching, acknowledgement and offset commits are
@@ -210,7 +210,7 @@ defmodule BroadwayKlife.Producer do
     per-partition) ordering is enough, or to fan message types out to different
     sinks (e.g. a dead-letter batcher).
 
-  Offset commits stay correct in every case — `BroadwayKlife.OffsetTracker`
+  Offset commits stay correct in every case — `OffBroadwayKlife.OffsetTracker`
   handles out-of-order acks regardless of how records are batched.
 
   Because the connector manages `:partition_by`, you must not set it yourself —
@@ -222,7 +222,7 @@ defmodule BroadwayKlife.Producer do
   Klife provides at-least-once delivery and this producer preserves it: an
   offset is only committed once it and every lower delivered offset on the
   same partition* have been acknowledged by Broadway (see
-  `BroadwayKlife.OffsetTracker`).
+  `OffBroadwayKlife.OffsetTracker`).
 
   Because Kafka tracks a single committed offset per partition, a failed
   message cannot be skipped while committing past it. Both successful and
@@ -236,7 +236,7 @@ defmodule BroadwayKlife.Producer do
   require Logger
 
   alias Broadway.Message
-  alias BroadwayKlife.OffsetTracker
+  alias OffBroadwayKlife.OffsetTracker
 
   @behaviour Broadway.Producer
   @behaviour Broadway.Acknowledger
@@ -410,7 +410,7 @@ defmodule BroadwayKlife.Producer do
   catch
     kind, reason when kind in [:exit, :error] ->
       Logger.warning(
-        "BroadwayKlife assigned_partitions failed for #{state.group_name}: #{inspect({kind, reason})}"
+        "OffBroadwayKlife assigned_partitions failed for #{state.group_name}: #{inspect({kind, reason})}"
       )
 
       []
@@ -425,7 +425,7 @@ defmodule BroadwayKlife.Producer do
     state.consumer_group.pull(state.group_name, topic, partition)
   catch
     :exit, reason ->
-      Logger.warning("BroadwayKlife pull exited for #{topic}:#{partition}: #{inspect(reason)}")
+      Logger.warning("OffBroadwayKlife pull exited for #{topic}:#{partition}: #{inspect(reason)}")
 
       {:ok, :empty}
   end
@@ -435,7 +435,7 @@ defmodule BroadwayKlife.Producer do
   catch
     :exit, reason ->
       Logger.warning(
-        "BroadwayKlife commit exited for #{topic}:#{partition}@#{offset}: #{inspect(reason)}"
+        "OffBroadwayKlife commit exited for #{topic}:#{partition}@#{offset}: #{inspect(reason)}"
       )
 
       :ok
@@ -484,7 +484,7 @@ defmodule BroadwayKlife.Producer do
   defp put_partition_by(broadway_opts) do
     if partition_by_set?(broadway_opts) do
       raise ArgumentError,
-            "BroadwayKlife.Producer manages :partition_by to preserve Kafka per-partition " <>
+            "OffBroadwayKlife.Producer manages :partition_by to preserve Kafka per-partition " <>
               "ordering and it must not be set manually. Remove the :partition_by option."
     end
 
@@ -529,24 +529,24 @@ defmodule BroadwayKlife.Producer do
   # NimbleOptions cannot express "exactly one of"; both options are optional in
   # the schema and the pairing is enforced here. Returns the consumer group
   # module plus the extra start args it needs: with :client the stock
-  # BroadwayKlife.ConsumerGroup module is used and gets bound to the client on
+  # OffBroadwayKlife.ConsumerGroup module is used and gets bound to the client on
   # its first start (see its moduledoc); a :consumer_group module already
   # carries its client in its `use` options.
   defp resolve_cg!(opts) do
     case {Keyword.fetch(opts, :client), Keyword.fetch(opts, :consumer_group)} do
       {{:ok, client}, :error} ->
-        {BroadwayKlife.ConsumerGroup, [client: client]}
+        {OffBroadwayKlife.ConsumerGroup, [client: client]}
 
       {:error, {:ok, mod}} ->
         {mod, []}
 
       {:error, :error} ->
         raise ArgumentError,
-              "one of :client or :consumer_group is required in BroadwayKlife.Producer options"
+              "one of :client or :consumer_group is required in OffBroadwayKlife.Producer options"
 
       {{:ok, _}, {:ok, _}} ->
         raise ArgumentError,
-              ":client and :consumer_group are mutually exclusive in BroadwayKlife.Producer " <>
+              ":client and :consumer_group are mutually exclusive in OffBroadwayKlife.Producer " <>
                 "options; set only one of them"
     end
   end

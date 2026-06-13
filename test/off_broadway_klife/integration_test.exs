@@ -1,4 +1,4 @@
-defmodule BroadwayKlife.IntegrationTest do
+defmodule OffBroadwayKlife.IntegrationTest do
   use ExUnit.Case, async: false
 
   @moduletag :integration
@@ -74,7 +74,7 @@ defmodule BroadwayKlife.IntegrationTest do
   end
 
   setup_all do
-    start_supervised!(BroadwayKlife.TestClient)
+    start_supervised!(OffBroadwayKlife.TestClient)
     :ok
   end
 
@@ -84,7 +84,7 @@ defmodule BroadwayKlife.IntegrationTest do
     t3 = "bk_e2e_#{:rand.bytes(8) |> Base.encode16()}"
 
     :ok =
-      Klife.Utils.create_topics(BroadwayKlife.TestClient, [
+      Klife.Utils.create_topics(OffBroadwayKlife.TestClient, [
         %{name: t1, partitions: 3},
         %{name: t2, partitions: 3},
         %{name: t3, partitions: 3}
@@ -131,7 +131,7 @@ defmodule BroadwayKlife.IntegrationTest do
   test "consumer_group: module escape hatch consumes end to end", %{tp_list: tp_list} do
     start_pipeline(
       topics: tp_list_to_topics(tp_list),
-      cg_source: [consumer_group: BroadwayKlife.TestConsumerGroup]
+      cg_source: [consumer_group: OffBroadwayKlife.TestConsumerGroup]
     )
 
     values = for i <- 1..3, do: "cg-#{i}"
@@ -513,7 +513,7 @@ defmodule BroadwayKlife.IntegrationTest do
         %Record{topic: t, partition: p, value: v}
       end
 
-    results = BroadwayKlife.TestClient.produce_batch(records)
+    results = OffBroadwayKlife.TestClient.produce_batch(records)
     assert {:ok, _} = Record.verify_batch(results)
   end
 
@@ -528,7 +528,7 @@ defmodule BroadwayKlife.IntegrationTest do
         %Record{topic: t, partition: p, value: value, headers: headers}
       end
 
-    results = BroadwayKlife.TestClient.produce_batch(records)
+    results = OffBroadwayKlife.TestClient.produce_batch(records)
     assert {:ok, _} = Record.verify_batch(results)
   end
 
@@ -542,7 +542,7 @@ defmodule BroadwayKlife.IntegrationTest do
       |> Keyword.take([:message_format])
       |> Keyword.merge(Keyword.get(opts, :producer_opts, []))
 
-    cg_source = Keyword.get(opts, :cg_source, client: BroadwayKlife.TestClient)
+    cg_source = Keyword.get(opts, :cg_source, client: OffBroadwayKlife.TestClient)
 
     producer_opts =
       cg_source ++
@@ -560,7 +560,7 @@ defmodule BroadwayKlife.IntegrationTest do
           block_ms: Keyword.get(opts, :block_ms, 10_000)
         },
         producer: [
-          module: {BroadwayKlife.Producer, producer_opts},
+          module: {OffBroadwayKlife.Producer, producer_opts},
           concurrency: Keyword.get(opts, :producer_concurrency, 1)
         ],
         processors: [

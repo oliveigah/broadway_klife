@@ -2,7 +2,7 @@ import Config
 
 import_config "#{config_env()}.exs"
 
-config :broadway_klife, BroadwayKlife.TestClient,
+config :off_broadway_klife, OffBroadwayKlife.TestClient,
   connection: [
     bootstrap_servers: ["localhost:19092", "localhost:29092"],
     ssl: false

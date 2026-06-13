@@ -1,8 +1,8 @@
-defmodule BroadwayKlifeExampleTest do
+defmodule OffBroadwayKlifeExampleTest do
   use ExUnit.Case
-  doctest BroadwayKlifeExample
+  doctest OffBroadwayKlifeExample
 
   test "greets the world" do
-    assert BroadwayKlifeExample.hello() == :world
+    assert OffBroadwayKlifeExample.hello() == :world
   end
 end

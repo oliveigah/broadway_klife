@@ -1,4 +1,4 @@
-defmodule BroadwayKlife.TestClient do
+defmodule OffBroadwayKlife.TestClient do
   @moduledoc false
-  use Klife.Client, otp_app: :broadway_klife
+  use Klife.Client, otp_app: :off_broadway_klife
 end

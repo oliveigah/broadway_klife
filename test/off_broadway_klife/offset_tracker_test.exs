@@ -1,7 +1,7 @@
-defmodule BroadwayKlife.OffsetTrackerTest do
+defmodule OffBroadwayKlife.OffsetTrackerTest do
   use ExUnit.Case, async: true
 
-  alias BroadwayKlife.OffsetTracker
+  alias OffBroadwayKlife.OffsetTracker
 
   @tp {"topic", 0}
 

@@ -1,4 +1,4 @@
-defmodule BroadwayKlife.OffsetTracker do
+defmodule OffBroadwayKlife.OffsetTracker do
   @moduledoc false
 
   defstruct partitions: %{}

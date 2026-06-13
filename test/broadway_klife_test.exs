@@ -1,4 +1,4 @@
-defmodule BroadwayKlifeTest do
+defmodule OffBroadwayKlifeTest do
   use ExUnit.Case
-  doctest BroadwayKlife
+  doctest OffBroadwayKlife
 end

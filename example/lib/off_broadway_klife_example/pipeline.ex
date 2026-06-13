@@ -1,4 +1,4 @@
-defmodule BroadwayKlifeExample.Pipeline do
+defmodule OffBroadwayKlifeExample.Pipeline do
   use Broadway
 
   alias Broadway.Message
@@ -9,8 +9,8 @@ defmodule BroadwayKlifeExample.Pipeline do
       name: __MODULE__,
       producer: [
         module:
-          {BroadwayKlife.Producer,
-           client: BroadwayKlifeExample.KafkaClient,
+          {OffBroadwayKlife.Producer,
+           client: OffBroadwayKlifeExample.KafkaClient,
            group_name: "broadway-klife-example-group",
            topics: [[name: "orders", offset_reset_policy: :latest]],
            receive_interval: 500},

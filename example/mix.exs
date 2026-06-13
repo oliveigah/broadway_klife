@@ -1,9 +1,9 @@
-defmodule BroadwayKlifeExample.MixProject do
+defmodule OffBroadwayKlifeExample.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :broadway_klife_example,
+      app: :off_broadway_klife_example,
       version: "0.1.0",
       elixir: "~> 1.19",
       start_permanent: Mix.env() == :prod,
@@ -15,13 +15,13 @@ defmodule BroadwayKlifeExample.MixProject do
   def application do
     [
       extra_applications: [:logger],
-      mod: {BroadwayKlifeExample.Application, []}
+      mod: {OffBroadwayKlifeExample.Application, []}
     ]
   end
 
   defp deps do
     [
-      {:broadway_klife, path: ".."},
+      {:off_broadway_klife, path: ".."},
       {:klife, path: "../../klife"}
     ]
   end

@@ -1,3 +1,3 @@
-defmodule BroadwayKlife do
+defmodule OffBroadwayKlife do
   @moduledoc false
 end

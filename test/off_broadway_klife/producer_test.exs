@@ -1,8 +1,8 @@
-defmodule BroadwayKlife.ProducerTest do
+defmodule OffBroadwayKlife.ProducerTest do
   use ExUnit.Case, async: true
 
   alias Broadway.Message
-  alias BroadwayKlife.Producer
+  alias OffBroadwayKlife.Producer
 
   # Minimal stand-in for a `use Klife.Consumer.ConsumerGroup` module: it only
   # needs to export the functions the producer relies on.
@@ -162,14 +162,14 @@ defmodule BroadwayKlife.ProducerTest do
 
       {[cg_child], updated} = Producer.prepare_for_start(__MODULE__, opts)
 
-      assert {BroadwayKlife.ConsumerGroup, :start_link, [cg_args]} = cg_child.start
+      assert {OffBroadwayKlife.ConsumerGroup, :start_link, [cg_args]} = cg_child.start
 
       assert cg_args[:client] == FakeClient
       assert cg_args[:group_name] == "my_group"
       assert Enum.all?(cg_args[:topics], fn tc -> tc[:mode] == :manual end)
 
       {_module, init_opts} = updated[:producer][:module]
-      assert init_opts[:consumer_group] == BroadwayKlife.ConsumerGroup
+      assert init_opts[:consumer_group] == OffBroadwayKlife.ConsumerGroup
     end
 
     test "leaves producer concurrency as set (no longer forced to 1)" do
