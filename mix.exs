@@ -8,7 +8,15 @@ defmodule BroadwayKlife.MixProject do
       elixir: "~> 1.19",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      name: "Broadway Klife",
+      description: "A broadway connector for kafka using Klife",
+      source_url: "https://github.com/oliveigah/broadway_klife",
+      extras: [],
+      package: [
+        licenses: ["MIT"],
+        links: %{"GitHub" => "https://github.com/oliveigah/broadway_klife"}
+      ]
     ]
   end
 
