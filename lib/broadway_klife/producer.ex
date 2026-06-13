@@ -364,7 +364,7 @@ defmodule BroadwayKlife.Producer do
     # fetching fair across the assigned partitions.
     partitions = state |> assigned_partitions() |> Enum.shuffle()
     {messages, tracker} = pull_round(partitions, total_demand, state, [], state.offset_tracker)
-    new_demand = total_demand - length(messages)
+    new_demand = max(total_demand - length(messages), 0)
 
     receive_timer =
       case {messages, new_demand} do

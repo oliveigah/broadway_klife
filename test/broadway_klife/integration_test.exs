@@ -483,6 +483,29 @@ defmodule BroadwayKlife.IntegrationTest do
     assert_receive {:message, %Message{data: %Record{value: "k2"}}}, 15_000
   end
 
+  test "pulls more records than demand", %{tp_list: tp_list} do
+    start_pipeline(topics: tp_list_to_topics(tp_list), processor_concurrency: 1, max_demand: 5)
+    values = for i <- 1..10, do: "v-#{i}"
+    produce!(tp_list, values)
+
+    expected_records = length(tp_list) * 10
+
+    consumed =
+      for _ <- 1..expected_records do
+        assert_receive {:message, %Message{data: %Record{} = record}}, 5_000
+        record
+      end
+
+    grouped_consumed =
+      Enum.group_by(consumed, fn %Record{} = rec -> {rec.topic, rec.partition} end)
+
+    Enum.each(grouped_consumed, fn {{t, p}, rec_list} ->
+      assert {t, p} in tp_list
+      rec_values = Enum.map(rec_list, fn %Record{topic: ^t, partition: ^p} = rec -> rec.value end)
+      assert rec_values == values
+    end)
+  end
+
   defp produce!(tp_list, values) do
     records =
       for {t, p} <- tp_list,
@@ -540,7 +563,12 @@ defmodule BroadwayKlife.IntegrationTest do
           module: {BroadwayKlife.Producer, producer_opts},
           concurrency: Keyword.get(opts, :producer_concurrency, 1)
         ],
-        processors: [default: [concurrency: 4]]
+        processors: [
+          default: [
+            concurrency: Keyword.get(opts, :processor_concurrency, 4),
+            max_demand: Keyword.get(opts, :max_demand, 100)
+          ]
+        ]
       ]
       |> maybe_put_batchers(Keyword.get(opts, :batchers))
 
