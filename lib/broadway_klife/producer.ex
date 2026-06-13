@@ -3,10 +3,10 @@ defmodule OffBroadwayKlife.Producer do
     client: [
       type: {:custom, __MODULE__, :validate_client, []},
       doc:
-        "A module that `use`s `Klife.Client`. The producer starts `OffBroadwayKlife.ConsumerGroup` " <>
+        "A module that `use`s `Klife.Client`. The producer starts the default consumer group module " <>
           "on this client (a single group membership) and drives it in manual mode. All " <>
-          "`:client` pipelines in a node must use the same client — see " <>
-          "`OffBroadwayKlife.ConsumerGroup`. Exactly one of `:client` or `:consumer_group` " <>
+          "`:client` pipelines in a node must use the same client." <>
+          ". Exactly one of `:client` or `:consumer_group` " <>
           "must be set."
     ],
     consumer_group: [
@@ -107,11 +107,10 @@ defmodule OffBroadwayKlife.Producer do
         end
       end
 
-  The producer starts its built-in consumer group, `OffBroadwayKlife.ConsumerGroup`,
-  on the client and supervises it as part of the pipeline, so there is no
+  The producer starts its built-in consumer group, on the client and supervises it as part of the pipeline, so there is no
   consumer group to define or add to your supervision tree. The built-in group
   is bound to the client on first start, which means all `:client` pipelines in
-  a node must use the same Klife client (see `OffBroadwayKlife.ConsumerGroup`).
+  a node must use the same Klife client.
 
   ### Using a consumer group module
 
@@ -210,8 +209,7 @@ defmodule OffBroadwayKlife.Producer do
     per-partition) ordering is enough, or to fan message types out to different
     sinks (e.g. a dead-letter batcher).
 
-  Offset commits stay correct in every case — `OffBroadwayKlife.OffsetTracker`
-  handles out-of-order acks regardless of how records are batched.
+  Offset commits stay correct in every case regardless of how records are batched.
 
   Because the connector manages `:partition_by`, you must not set it yourself —
   doing so raises. Scale out across partitions with processor/batcher
@@ -221,8 +219,7 @@ defmodule OffBroadwayKlife.Producer do
 
   Klife provides at-least-once delivery and this producer preserves it: an
   offset is only committed once it and every lower delivered offset on the
-  same partition* have been acknowledged by Broadway (see
-  `OffBroadwayKlife.OffsetTracker`).
+  same partition* have been acknowledged by Broadway.
 
   Because Kafka tracks a single committed offset per partition, a failed
   message cannot be skipped while committing past it. Both successful and
@@ -528,8 +525,7 @@ defmodule OffBroadwayKlife.Producer do
 
   # NimbleOptions cannot express "exactly one of"; both options are optional in
   # the schema and the pairing is enforced here. Returns the consumer group
-  # module plus the extra start args it needs: with :client the stock
-  # OffBroadwayKlife.ConsumerGroup module is used and gets bound to the client on
+  # module plus the extra start args it needs: with :client the stock is used and gets bound to the client on
   # its first start (see its moduledoc); a :consumer_group module already
   # carries its client in its `use` options.
   defp resolve_cg!(opts) do
