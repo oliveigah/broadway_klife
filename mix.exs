@@ -35,7 +35,8 @@ defmodule BroadwayKlife.MixProject do
     [
       {:klife, "~> 1.1"},
       {:broadway, "~> 1.3"},
-      {:nimble_options, "~> 1.0"}
+      {:nimble_options, "~> 1.0"},
+      {:ex_doc, "~> 0.31", only: :dev, runtime: false}
     ]
   end
 end
