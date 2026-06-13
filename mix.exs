@@ -16,6 +16,12 @@ defmodule BroadwayKlife.MixProject do
       package: [
         licenses: ["MIT"],
         links: %{"GitHub" => "https://github.com/oliveigah/broadway_klife"}
+      ],
+      docs: [
+        main: "readme",
+        extras: [
+          "README.md"
+        ]
       ]
     ]
   end
