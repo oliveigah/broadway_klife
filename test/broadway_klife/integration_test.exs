@@ -128,6 +128,31 @@ defmodule BroadwayKlife.IntegrationTest do
     end)
   end
 
+  test "consumer_group: module escape hatch consumes end to end", %{tp_list: tp_list} do
+    start_pipeline(
+      topics: tp_list_to_topics(tp_list),
+      cg_source: [consumer_group: BroadwayKlife.TestConsumerGroup]
+    )
+
+    values = for i <- 1..3, do: "cg-#{i}"
+    produce!(tp_list, values)
+
+    expected_records = length(tp_list) * 3
+
+    consumed =
+      for _ <- 1..expected_records do
+        assert_receive {:message, %Message{data: %Record{} = record}}, 15_000
+        record
+      end
+
+    grouped = Enum.group_by(consumed, fn %Record{} = rec -> {rec.topic, rec.partition} end)
+
+    Enum.each(grouped, fn {{t, p}, rec_list} ->
+      assert {t, p} in tp_list
+      assert Enum.map(rec_list, & &1.value) == values
+    end)
+  end
+
   test "consumes with :broadway_kafka format (data is the value + metadata)", %{tp_list: tp_list} do
     start_pipeline(topics: tp_list_to_topics(tp_list), message_format: :broadway_kafka)
     values = for i <- 1..5, do: "bk-#{i}"
@@ -494,13 +519,15 @@ defmodule BroadwayKlife.IntegrationTest do
       |> Keyword.take([:message_format])
       |> Keyword.merge(Keyword.get(opts, :producer_opts, []))
 
+    cg_source = Keyword.get(opts, :cg_source, client: BroadwayKlife.TestClient)
+
     producer_opts =
-      [
-        consumer_group: BroadwayKlife.TestConsumerGroup,
-        group_name: Keyword.get(opts, :group_name, "bk_e2e_grp_#{unique}"),
-        topics: Enum.map(topics, fn t -> [name: t, offset_reset_policy: reset] end),
-        receive_interval: 100
-      ] ++ producer_extra
+      cg_source ++
+        [
+          group_name: Keyword.get(opts, :group_name, "bk_e2e_grp_#{unique}"),
+          topics: Enum.map(topics, fn t -> [name: t, offset_reset_policy: reset] end),
+          receive_interval: 100
+        ] ++ producer_extra
 
     broadway =
       [

@@ -1,11 +1,20 @@
 defmodule BroadwayKlife.Producer do
   @producer_opts [
+    client: [
+      type: {:custom, __MODULE__, :validate_client, []},
+      doc:
+        "A module that `use`s `Klife.Client`. The producer starts `BroadwayKlife.ConsumerGroup` " <>
+          "on this client (a single group membership) and drives it in manual mode. All " <>
+          "`:client` pipelines in a node must use the same client — see " <>
+          "`BroadwayKlife.ConsumerGroup`. Exactly one of `:client` or `:consumer_group` " <>
+          "must be set."
+    ],
     consumer_group: [
       type: {:custom, __MODULE__, :validate_consumer_group, []},
-      required: true,
       doc:
-        "A module that `use`s `Klife.Consumer.ConsumerGroup`. Started once by the " <>
-          "producer (a single group membership) and driven in manual mode."
+        "A module that `use`s `Klife.Consumer.ConsumerGroup`, as an alternative to " <>
+          "`:client` for when you also want the group's lifecycle callbacks. Started " <>
+          "once by the producer (a single group membership) and driven in manual mode."
     ],
     group_name: [
       type: :string,
@@ -63,14 +72,14 @@ defmodule BroadwayKlife.Producer do
 
   ## Usage
 
-  First define the consumer group module and a `Klife.Client` (see Klife's
-  docs for client configuration):
+  Define a `Klife.Client` (see Klife's docs for client configuration) and make
+  sure it is started in your supervision tree *before* the pipeline:
 
-      defmodule MyApp.KafkaConsumerGroup do
-        use Klife.Consumer.ConsumerGroup, client: MyApp.KafkaClient
+      defmodule MyApp.KafkaClient do
+        use Klife.Client, otp_app: :my_app
       end
 
-  Then start Broadway with this producer:
+  Then start Broadway with this producer, pointing it at the client:
 
       defmodule MyApp.Pipeline do
         use Broadway
@@ -81,7 +90,7 @@ defmodule BroadwayKlife.Producer do
             producer: [
               module:
                 {BroadwayKlife.Producer,
-                 consumer_group: MyApp.KafkaConsumerGroup,
+                 client: MyApp.KafkaClient,
                  group_name: "my-broadway-group",
                  topics: [[name: "orders"], [name: "events"]],
                  receive_interval: 500},
@@ -98,8 +107,42 @@ defmodule BroadwayKlife.Producer do
         end
       end
 
-  Make sure `MyApp.KafkaClient` is started in your supervision tree *before*
-  the pipeline.
+  The producer starts its built-in consumer group, `BroadwayKlife.ConsumerGroup`,
+  on the client and supervises it as part of the pipeline, so there is no
+  consumer group to define or add to your supervision tree. The built-in group
+  is bound to the client on first start, which means all `:client` pipelines in
+  a node must use the same Klife client (see `BroadwayKlife.ConsumerGroup`).
+
+  ### Using a consumer group module
+
+  To run Klife's consumer lifecycle callbacks (`handle_consumer_start/3` and
+  `handle_consumer_stop/4`) alongside Broadway — or to consume through more
+  than one Klife client — define a consumer group module and pass it as
+  `:consumer_group` instead of `:client` (the two options are mutually
+  exclusive):
+
+      defmodule MyApp.KafkaConsumerGroup do
+        use Klife.Consumer.ConsumerGroup, client: MyApp.KafkaClient
+
+        @impl true
+        def handle_consumer_start(_topic, _partition, _group_name) do
+          # e.g. emit telemetry
+          :ok
+        end
+      end
+
+      producer: [
+        module:
+          {BroadwayKlife.Producer,
+           consumer_group: MyApp.KafkaConsumerGroup,
+           group_name: "my-broadway-group",
+           topics: [[name: "orders"]]}
+      ]
+
+  Do not implement `handle_record_batch/4`: Broadway drives fetching and
+  committing through Klife's manual mode, so that callback never runs. The
+  producer starts the group in either case — do not add it to your supervision
+  tree.
 
   ## Options
 
@@ -129,16 +172,17 @@ defmodule BroadwayKlife.Producer do
 
   ## Producer concurrency
 
-  The consumer group is started once and keeps a single membership regardless of
-  how many producers run. Producer `concurrency` may be greater than `1`: each
+  The Klife consumer group is started once and keeps a single membership no
+  matter how many producers run. You may set producer `concurrency > 1`: each
   assigned `{topic, partition}` is claimed by exactly one producer via a stable
-  hash of the pair, so producers share the pull/commit load with no overlap and
-  without ever splitting a partition's offset tracking. There is no coordinator
-  process — every producer derives the same disjoint view independently.
+  hash, so producers share the pull/commit load with no overlap and no extra group
+  members with no coordinator process overhead. For maximum concurrency raise it
+  up to the expected number of assigned partitions for a given member of the group,
+  any exceeding producer will stay idle.
 
-  Raise `concurrency` up to (at most) the number of partitions you expect to be
-  assigned to the node; producers beyond that simply stay idle.
-  what happens when a failuer happens in the handle_batch? All messages are acked?
+  Raise `concurrency` up to the number of partitions you expect to be
+  assigned to the application; producers beyond assigned stay idle.
+
   ## Ordering
 
   Kafka guarantees ordering per topic-partition. The connector preserves it end
@@ -176,7 +220,7 @@ defmodule BroadwayKlife.Producer do
   ## Delivery semantics
 
   Klife provides at-least-once delivery and this producer preserves it: an
-  offset is only committed once it *and every lower delivered offset on the
+  offset is only committed once it and every lower delivered offset on the
   same partition* have been acknowledged by Broadway (see
   `BroadwayKlife.OffsetTracker`).
 
@@ -211,22 +255,28 @@ defmodule BroadwayKlife.Producer do
   def prepare_for_start(_module, broadway_opts) do
     {producer_module, producer_opts} = broadway_opts[:producer][:module]
     opts = NimbleOptions.validate!(producer_opts, @producer_opts)
+    {cg_mod, client_args} = resolve_cg!(opts)
 
     cg_args =
       [group_name: opts[:group_name], topics: force_manual_mode(opts[:topics])] ++
-        Keyword.take(opts, @consumer_group_passthrough)
+        client_args ++ Keyword.take(opts, @consumer_group_passthrough)
 
     cg_child = %{
-      id: {opts[:consumer_group], opts[:group_name]},
-      start: {BroadwayKlife.ConsumerGroupStarter, :start_link, [opts[:consumer_group], cg_args]},
+      id: {cg_mod, opts[:group_name]},
+      start: {cg_mod, :start_link, [cg_args]},
       restart: :permanent,
       type: :worker
     }
 
     # Each producer needs the pool size to claim its share of partitions (owns?/3);
-    # carry the validated opts (defaults applied) forward to init/1.
+    # carry the validated opts (defaults applied, :consumer_group resolved)
+    # forward to init/1.
     producer_count = broadway_opts[:producer][:concurrency] || 1
-    init_opts = Keyword.put(opts, :producer_count, producer_count)
+
+    init_opts =
+      opts
+      |> Keyword.put(:producer_count, producer_count)
+      |> Keyword.put(:consumer_group, cg_mod)
 
     producer_config =
       Keyword.put(broadway_opts[:producer], :module, {producer_module, init_opts})
@@ -474,6 +524,46 @@ defmodule BroadwayKlife.Producer do
 
   def partition_by(%Message{metadata: %{topic: topic, partition: partition}}) do
     :erlang.phash2({topic, partition})
+  end
+
+  # NimbleOptions cannot express "exactly one of"; both options are optional in
+  # the schema and the pairing is enforced here. Returns the consumer group
+  # module plus the extra start args it needs: with :client the stock
+  # BroadwayKlife.ConsumerGroup module is used and gets bound to the client on
+  # its first start (see its moduledoc); a :consumer_group module already
+  # carries its client in its `use` options.
+  defp resolve_cg!(opts) do
+    case {Keyword.fetch(opts, :client), Keyword.fetch(opts, :consumer_group)} do
+      {{:ok, client}, :error} ->
+        {BroadwayKlife.ConsumerGroup, [client: client]}
+
+      {:error, {:ok, mod}} ->
+        {mod, []}
+
+      {:error, :error} ->
+        raise ArgumentError,
+              "one of :client or :consumer_group is required in BroadwayKlife.Producer options"
+
+      {{:ok, _}, {:ok, _}} ->
+        raise ArgumentError,
+              ":client and :consumer_group are mutually exclusive in BroadwayKlife.Producer " <>
+                "options; set only one of them"
+    end
+  end
+
+  @doc false
+  def validate_client(mod) when is_atom(mod) and not is_nil(mod) do
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :get_default_fetcher, 0) do
+      {:ok, mod}
+    else
+      {:error,
+       "#{inspect(mod)} is not a Klife client; define it with " <>
+         "`use Klife.Client, otp_app: :my_app`"}
+    end
+  end
+
+  def validate_client(other) do
+    {:error, "expected a Klife client module, got: #{inspect(other)}"}
   end
 
   @doc false

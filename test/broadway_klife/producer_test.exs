@@ -13,17 +13,38 @@ defmodule BroadwayKlife.ProducerTest do
     def start_link(_args), do: :ignore
   end
 
+  # Minimal stand-in for a `use Klife.Client` module: only the marker function
+  # the producer's validation checks for.
+  defmodule FakeClient do
+    def get_default_fetcher(), do: :fake_fetcher
+  end
+
   defp broadway_opts(extra \\ []) do
     [
       name: __MODULE__.Pipeline,
       producer: [
         module:
           {Producer,
-           consumer_group: FakeConsumerGroup, group_name: "g", topics: [[name: "orders"]]},
+           consumer_group: FakeConsumerGroup, group_name: "my_group", topics: [[name: "orders"]]},
         concurrency: 1
       ],
       processors: [default: []]
     ] ++ extra
+  end
+
+  # Overrides producer-level options inside broadway_opts/0; a nil value
+  # deletes the key (e.g. to drop the default :consumer_group).
+  defp broadway_opts_with_producer(producer_overrides) do
+    opts = broadway_opts()
+    {Producer, producer_opts} = opts[:producer][:module]
+
+    producer_opts =
+      Enum.reduce(producer_overrides, producer_opts, fn
+        {key, nil}, acc -> Keyword.delete(acc, key)
+        {key, value}, acc -> Keyword.put(acc, key, value)
+      end)
+
+    put_in(opts[:producer][:module], {Producer, producer_opts})
   end
 
   defp message_for(topic, partition) do
@@ -99,6 +120,58 @@ defmodule BroadwayKlife.ProducerTest do
       end
     end
 
+    test "raises when :client is not a Klife client" do
+      opts = broadway_opts_with_producer(client: Enum, consumer_group: nil)
+
+      assert_raise NimbleOptions.ValidationError, ~r/Klife client/, fn ->
+        Producer.prepare_for_start(__MODULE__, opts)
+      end
+    end
+
+    test "raises when neither :client nor :consumer_group is set" do
+      opts = broadway_opts_with_producer(consumer_group: nil)
+
+      assert_raise ArgumentError, ~r/one of :client or :consumer_group/, fn ->
+        Producer.prepare_for_start(__MODULE__, opts)
+      end
+    end
+
+    test "raises when both :client and :consumer_group are set" do
+      opts = broadway_opts_with_producer(client: FakeClient)
+
+      assert_raise ArgumentError, ~r/mutually exclusive/, fn ->
+        Producer.prepare_for_start(__MODULE__, opts)
+      end
+    end
+
+    test "the :consumer_group module is started as the group, with no extra args" do
+      {[cg_child], updated} = Producer.prepare_for_start(__MODULE__, broadway_opts())
+
+      assert {FakeConsumerGroup, :start_link, [cg_args]} = cg_child.start
+
+      refute Keyword.has_key?(cg_args, :client)
+      assert cg_args[:group_name] == "my_group"
+      assert Enum.all?(cg_args[:topics], fn tc -> tc[:mode] == :manual end)
+
+      {_module, init_opts} = updated[:producer][:module]
+      assert init_opts[:consumer_group] == FakeConsumerGroup
+    end
+
+    test ":client starts the stock consumer group module bound to the client" do
+      opts = broadway_opts_with_producer(client: FakeClient, consumer_group: nil)
+
+      {[cg_child], updated} = Producer.prepare_for_start(__MODULE__, opts)
+
+      assert {BroadwayKlife.ConsumerGroup, :start_link, [cg_args]} = cg_child.start
+
+      assert cg_args[:client] == FakeClient
+      assert cg_args[:group_name] == "my_group"
+      assert Enum.all?(cg_args[:topics], fn tc -> tc[:mode] == :manual end)
+
+      {_module, init_opts} = updated[:producer][:module]
+      assert init_opts[:consumer_group] == BroadwayKlife.ConsumerGroup
+    end
+
     test "leaves producer concurrency as set (no longer forced to 1)" do
       opts = put_in(broadway_opts()[:producer][:concurrency], 8)
       {[_cg_child], updated} = Producer.prepare_for_start(__MODULE__, opts)
@@ -128,11 +201,11 @@ defmodule BroadwayKlife.ProducerTest do
 
   describe "init/1" do
     test "reads this producer's index and the pool size" do
-      # init/1 receives options already validated by prepare_for_start (defaults
-      # applied), so receive_interval/message_format are present.
+      # init/1 receives options already resolved by prepare_for_start (defaults
+      # applied, :consumer_group resolved), so all keys are present.
       opts = [
         consumer_group: FakeConsumerGroup,
-        group_name: "g",
+        group_name: "my_group",
         receive_interval: 1_000,
         message_format: :klife,
         producer_count: 3,
