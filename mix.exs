@@ -25,7 +25,7 @@ defmodule BroadwayKlife.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:klife, path: "../klife"},
+      {:klife, "~> 1.1"},
       {:broadway, "~> 1.3"},
       {:nimble_options, "~> 1.0"}
     ]
